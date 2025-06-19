@@ -183,50 +183,116 @@ def parse_game_data_section(ast):
     return game_data
 
 
+# def extract_table_as_list(table_node):
+#     """将table节点转为台词列表，每行是dict"""
+#     result = []
+#     headers = []
+#     for child in table_node.get("children", []):
+#         if child.get("type") == "table_head":
+#             for row in child.get("children", []):
+#                 if row.get("type") == "table_cell":
+#                     headers.append(extract_text_from_node(row).strip())
+#         if child.get("type") == "table_body":
+#             for row in child.get("children", []):
+#                 if row.get("type") == "table_row":
+#                     cells = row.get("children", [])
+#                     row_data = [extract_text_from_node(cell).strip() for cell in cells]
+#                     # 跳过全空行
+#                     if not any(row_data) or row_data[0] == "场合":
+#                         continue
+#                     # 只保留有内容的前两列
+#                     if len(row_data) >= 2:
+#                         result.append({"occasion": row_data[0], "line": row_data[1]})
+#     return result
 def extract_table_as_list(table_node):
-    """将table节点转为台词列表，每行是dict"""
+    """将table节点转为台词列表，每行是dict。"""
     result = []
-    headers = []
-    for child in table_node.get("children", []):
-        if child.get("type") == "table_head":
-            for row in child.get("children", []):
-                if row.get("type") == "table_cell":
-                    headers.append(extract_text_from_node(row).strip())
-        if child.get("type") == "table_body":
-            for row in child.get("children", []):
-                if row.get("type") == "table_row":
-                    cells = row.get("children", [])
-                    row_data = [extract_text_from_node(cell).strip() for cell in cells]
-                    # 跳过全空行
-                    if not any(row_data) or row_data[0] == "场合":
-                        continue
-                    # 只保留有内容的前两列
-                    if len(row_data) >= 2:
-                        result.append({"occasion": row_data[0], "line": row_data[1]})
+
+    # 遍历所有行，不管是表头(table_head)还是表体(table_body)
+    rows = []
+    if "children" in table_node:
+        for part in table_node["children"]:
+            if part.get("type") in ("table_head", "table_body") and "children" in part:
+                rows.extend(part["children"])
+
+    for row in rows:
+        if row.get("type") != "table_row":
+            continue
+
+        cells = row.get("children", [])
+        # 提取所有单元格的纯文本
+        row_data = [extract_text_from_node(cell).strip() for cell in cells]
+
+        # 跳过空行
+        if not any(row_data):
+            continue
+
+        # 更精确地识别表头行
+        if len(row_data) >= 2:
+            first_cell = row_data[0].lower()
+            second_cell = row_data[1].lower() if len(row_data) > 1 else ""
+
+            # 跳过表头行 - 检查多种可能的表头格式
+            if (
+                ("场合" in first_cell and "台词" in second_cell)
+                or ("学生台词与语音" in " ".join(row_data))
+                or (first_cell == "场合" and second_cell == "台词")
+                or (
+                    "标题" in first_cell
+                    and any("蔚蓝档案" in cell for cell in row_data)
+                )
+            ):
+                continue
+
+            # 有效的数据行
+            occasion = row_data[0] if row_data[0] else ""
+            line_text = row_data[1] if len(row_data) > 1 else ""
+
+            # 只要有场合或台词内容就添加
+            if occasion or line_text:
+                result.append({"occasion": occasion, "line": line_text})
+
     return result
 
 
 def parse_quotes_section(ast):
+    """解析角色台词部分，更robust地处理各种表格布局"""
     quotes = {}
     in_quotes = False
-    current_version = None
+    current_version = "原始"  # 默认版本处理没有明确版本标题的情况
+
+    quote_section_names = ["角色台词", "角色语音", "学生台词与语音"]
+
     for node in ast:
-        # 找到“角色台词”二级标题
+        # 找到"角色台词"二级标题
         if node.get("type") == "heading" and node.get("attrs", {}).get("level") == 2:
             title = extract_text_from_node(node).strip()
-            if title == "角色台词":
+            if any(name in title for name in quote_section_names):
                 in_quotes = True
+                # 初始化默认版本
+                if current_version not in quotes:
+                    quotes[current_version] = []
                 continue
             elif in_quotes:
+                # 离开角色台词section
                 break
+
         if not in_quotes:
             continue
+
         # 三级标题作为版本名
         if node.get("type") == "heading" and node.get("attrs", {}).get("level") == 3:
             current_version = extract_text_from_node(node).strip()
-            quotes[current_version] = []
-        elif node.get("type") == "table" and current_version:
-            quotes[current_version].extend(extract_table_as_list(node))
+            if current_version not in quotes:
+                quotes[current_version] = []
+        elif node.get("type") == "table":
+            # 确保当前版本存在
+            if current_version not in quotes:
+                quotes[current_version] = []
+            # 解析表格并添加到当前版本
+            table_quotes = extract_table_as_list(node)
+            quotes[current_version].extend(table_quotes)
+
     return quotes
 
 
@@ -259,6 +325,10 @@ if __name__ == "__main__":
         for md_file in md_files:
             logger.info(f"正在处理文件: {md_file.name}")
             md_text = md_file.read_text(encoding="utf-8")
+            md_text = md_text.replace(
+                "| 学生台词与语音 | | | |\n| --- | --- | --- | --- |",
+                "| 学生台词与语音 | | |\n| --- | --- | --- |",
+            )
 
             markdown = mistune.create_markdown(
                 renderer="ast", plugins=[table, strikethrough]

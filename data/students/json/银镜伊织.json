@@ -91,5 +91,104 @@
             "火宫千夏"
         ]
     },
-    "角色台词": {}
+    "角色台词": {
+        "原始": [
+            {
+                "occasion": "获得学生",
+                "line": "---"
+            },
+            {
+                "occasion": "咖啡厅独白1",
+                "line": "---"
+            },
+            {
+                "occasion": "咖啡厅独白2",
+                "line": "---"
+            },
+            {
+                "occasion": "咖啡厅独白3",
+                "line": "---"
+            },
+            {
+                "occasion": "咖啡厅独白4",
+                "line": "---"
+            },
+            {
+                "occasion": "咖啡厅独白5",
+                "line": "---"
+            },
+            {
+                "occasion": "登陆1",
+                "line": "---"
+            },
+            {
+                "occasion": "登陆2",
+                "line": "---"
+            },
+            {
+                "occasion": "大厅1",
+                "line": "---"
+            },
+            {
+                "occasion": "大厅2",
+                "line": "---"
+            },
+            {
+                "occasion": "大厅3",
+                "line": "---"
+            },
+            {
+                "occasion": "大厅4",
+                "line": "---"
+            },
+            {
+                "occasion": "大厅5",
+                "line": "---"
+            },
+            {
+                "occasion": "老师生日",
+                "line": "---"
+            },
+            {
+                "occasion": "学生生日",
+                "line": "---"
+            },
+            {
+                "occasion": "新年",
+                "line": "---"
+            },
+            {
+                "occasion": "圣诞节",
+                "line": "---"
+            },
+            {
+                "occasion": "万圣节",
+                "line": "---"
+            },
+            {
+                "occasion": "武器获得",
+                "line": "---"
+            },
+            {
+                "occasion": "记忆大厅1",
+                "line": "---"
+            },
+            {
+                "occasion": "记忆大厅2",
+                "line": "---"
+            },
+            {
+                "occasion": "记忆大厅3",
+                "line": "---"
+            },
+            {
+                "occasion": "记忆大厅4",
+                "line": "---"
+            },
+            {
+                "occasion": "记忆大厅5",
+                "line": "---"
+            }
+        ]
+    }
 }
