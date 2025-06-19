@@ -14,3 +14,4 @@ data/**/markdown
 data/bak
 data/**/*.ast.json
 data/**/*.md
+.env
