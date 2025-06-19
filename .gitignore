@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+data/students.html
+data/**/markdown
+data/bak
+data/**/*.ast.json
+data/**/*.md
