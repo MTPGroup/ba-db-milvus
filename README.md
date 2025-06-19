@@ -92,34 +92,59 @@ uvicorn src.main:app --reload
 
 你可以使用 `curl` 或任何 API 测试工具与 `/api/v1/search` 端点交互。
 
-### 示例 1: 简单的语义搜索
+### 示例 1：精确查找三一补习部的学生
 
-在 `students` 集合中搜索与“补习部的成员”语义最相关的学生。
+**意图**：我想在**三一综合学园**的学生中，找出那些**简介包含“补习”**的学生，并且他们要和**“头疼”**这个词语义最相关。
 
 ```bash
-curl -X 'POST' \
-  'http://127.0.0.1:8000/api/v1/search' \
-  -H 'Content-Type: application/json' \
-  -d '{
+curl -X 'POST' 'http://127.0.0.1:8000/api/v1/search' \
+-H 'Content-Type: application/json' \
+-d '{
   "collection_name": "students",
-  "query": "补习部的成员",
-  "top_k": 3
+  "query": "头疼",
+  "top_k": 3,
+  "filters": {
+    "school": "三一综合学园",
+    "introduction": "补习"
+  }
 }'
 ```
 
-### 示例 2: 混合搜索 (过滤 + 语义)
+这个请求会被转换成 `filter="school like '%三一综合学园%' and tags like '%补习%'"`，从而实现极其精确的筛选。
 
-先筛选出所有名字中包含“梓”的学生，然后在这些学生中找出与“有点担心她的身体”描述最相关的条目。
+### 示例 2：查找新年版的学生台词
+
+**意图**：我想找**浅黄睦月**的**新年**台词中，和**“恶作剧”**最相关的台词。
 
 ```bash
-curl -X 'POST' \
-  'http://127.0.0.1:8000/api/v1/search' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "collection_name": "students",
-  "query": "有点担心她的身体",
+curl -X 'POST' 'http://127.0.0.1:8000/api/v1/search' \
+-H 'Content-Type: application/json' \
+-d '{
+  "collection_name": "student_quotes",
+  "query": "恶作剧",
   "top_k": 2,
-  "filter_by_name": "梓"
+  "filters": {
+    "student_name": "浅黄睦月",
+    "version": "新年"
+  }
+}'
+```
+
+### 示例 3：自定义返回字段
+
+**意图**：我只想知道学生的**姓名**和**学校**，不需要长篇的介绍，以减少网络传输。
+
+```bash
+curl -X 'POST' 'http://127.0.0.1:8000/api/v1/search' \
+-H 'Content-Type: application/json' \
+-d '{
+  "collection_name": "students",
+  "query": "天才黑客",
+  "top_k": 5,
+  "filters": {
+    "school": "千年"
+  },
+  "output_fields": ["name", "school"]
 }'
 ```
 

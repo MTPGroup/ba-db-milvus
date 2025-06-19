@@ -19,10 +19,18 @@ class SearchRequest(BaseModel):
         "clubs",
         "game_basic_info",
     ] = Field(..., description="要搜索的集合的名称。")
-    query: str = Field(..., description="用于搜索的文本查询。")
+    query: str = Field(..., description="用于语义搜索的文本查询。")
     top_k: int = Field(3, gt=0, le=20, description="要返回的最佳结果数量。")
-    filter_by_name: str | None = Field(
-        None, description="（可选）按名称精确过滤，仅对students, schools, clubs有效。"
+
+    # 使用灵活的字典进行过滤，而不是固定的字符串
+    filters: Dict[str, Any] | None = Field(
+        None,
+        description="（可选）用于元数据过滤的键值对。示例: {'school': '三一', 'tags': '补习'}",
+    )
+
+    # 允许用户自定义返回的字段
+    output_fields: List[str] | None = Field(
+        None, description="（可选）指定要返回的字段列表。如果为 null，则返回默认字段。"
     )
 
 
@@ -53,12 +61,13 @@ async def startup_event():
     - 加载句向量模型。
     - 确保所有集合都已创建索引并加载到内存中。
     """
+
     # 初始化 Milvus 客户端
     logger.info(f"正在连接到 Milvus: {MILVUS_URI}...")
-    if not MILVUS_URI or not MILVUS_TOKEN:
-        raise RuntimeError("必须在 .env 文件中设置 MILVUS_URI 和 MILVUS_TOKEN")
+    if not MILVUS_URI:
+        raise RuntimeError("必须在 .env 文件中设置 MILVUS_URI")
 
-    client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN)
+    client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN if MILVUS_TOKEN else "")
     app.state.milvus_client = client
     logger.info("成功连接到 Milvus。")
 
@@ -96,19 +105,6 @@ async def startup_event():
                 app.state.pk_fields[name] = pk_field
                 logger.info(f"缓存集合 '{name}' 的主键: '{pk_field}'")
 
-            # 自动确定向量字段名
-            vector_field = next(
-                (
-                    f["name"]
-                    for f in collection_info["fields"]
-                    if f["name"].endswith("vector")
-                ),
-                None,
-            )
-            if not vector_field:
-                logger.warning(f"在集合 '{name}' 中未找到向量字段，跳过。")
-                continue
-
             # 加载集合
             logger.info(f"正在加载集合 '{name}' 到内存...")
             client.load_collection(name)
@@ -127,17 +123,35 @@ async def shutdown_event():
     logger.info("资源已释放。")
 
 
-def get_output_fields(collection_name: str) -> List[str]:
-    """根据集合名称返回推荐的输出字段列表。"""
+def build_filter_expression(filters: Dict[str, Any] | None) -> str:
+    """根据字典动态构建 Milvus 的 filter 表达式。"""
+
+    if not filters:
+        return ""
+
+    expressions = []
+    for key, value in filters.items():
+        # 对字符串值使用 'like' 实现包含匹配，对其他类型使用 '=='
+        if isinstance(value, str):
+            # Milvus 的 'like' 需要将模式放在双引号内
+            expressions.append(f'{key} like "%{value}%"')
+        elif isinstance(value, list):
+            # 处理列表，使用 'in' 操作符
+            # 确保列表中的字符串元素也被正确引用
+            formatted_list = [f'"{v}"' if isinstance(v, str) else str(v) for v in value]
+            expressions.append(f"{key} in [{','.join(formatted_list)}]")
+        else:
+            # 处理数字等其他类型
+            expressions.append(f"{key} == {value}")
+
+    return " and ".join(expressions)
+
+
+def get_default_output_fields(collection_name: str) -> List[str]:
+    """根据集合名称返回默认的输出字段列表。"""
+
     field_map = {
-        "students": [
-            "name",
-            "school",
-            "profile",
-            "introduction",
-            "experience",
-            "aliases",
-        ],
+        "students": ["name", "school", "introduction", "aliases", "tags"],
         "student_quotes": ["student_name", "version", "quote_text"],
         "student_relations": ["student_name", "related_student_name", "relation_type"],
         "schools": ["name", "introduction", "facilities"],
@@ -147,14 +161,14 @@ def get_output_fields(collection_name: str) -> List[str]:
     return field_map.get(collection_name, ["*"])
 
 
-@app.post("/api/v1/search", response_model=SearchResponse, summary="通用向量搜索")
+@app.post("/api/v1/search", response_model=SearchResponse, summary="通用混合搜索")
 async def search(
     request: SearchRequest,
     client: MilvusClient = Depends(lambda: app.state.milvus_client),
     model: SentenceTransformer = Depends(lambda: app.state.embedding_model),
 ):
     """
-    在指定的集合中执行向量相似性搜索。
+    在指定的集合中执行混合搜索（元数据过滤 + 向量相似性搜索）。
     """
     # 将查询文本编码为向量
     try:
@@ -164,38 +178,27 @@ async def search(
         logger.error(f"查询编码失败: {e}")
         raise HTTPException(status_code=500, detail="处理查询文本失败。")
 
-    search_filter = None
-    if request.filter_by_name and request.collection_name in [
-        "students",
-        "schools",
-        "clubs",
-        "student_quotes",
-    ]:
-        if request.collection_name == "student_quotes":
-            search_filter = f"student_name like '%{request.filter_by_name}%'"
-        else:
-            search_filter = f"name like '%{request.filter_by_name}%' or aliases like '%{request.filter_by_name}%'"
-        logger.info(f"应用过滤器: {search_filter}")
+    # 构建动态过滤器
+    filter_expression = build_filter_expression(request.filters)
+    if filter_expression:
+        logger.info(f"应用过滤器: {filter_expression}")
+
+    # 确定输出字段
+    output_fields = request.output_fields or get_default_output_fields(
+        request.collection_name
+    )
 
     # 执行搜索
     try:
-        if search_filter:
-            raw_results = client.search(
-                collection_name=request.collection_name,
-                data=[query_vector],
-                limit=request.top_k,
-                output_fields=get_output_fields(request.collection_name),
-                search_params={"metric_type": "L2"},
-                filter=search_filter,
-            )
-        else:
-            raw_results = client.search(
-                collection_name=request.collection_name,
-                data=[query_vector],
-                limit=request.top_k,
-                output_fields=get_output_fields(request.collection_name),
-                search_params={"metric_type": "L2"},
-            )
+        raw_results = client.search(
+            collection_name=request.collection_name,
+            data=[query_vector],
+            limit=request.top_k,
+            filter=filter_expression,
+            output_fields=output_fields,
+            search_params={"metric_type": "L2"},
+        )
+
         primary_key_field = app.state.pk_fields.get(request.collection_name)
         if not primary_key_field:
             raise HTTPException(
