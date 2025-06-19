@@ -65,7 +65,7 @@ services:
     ports:
       - "8001:3000"
     environment:
-      - MILVUS_URL=localhost:19530
+      - MILVUS_URL=standalone:19530
     restart: always
 
 networks:
